@@ -194,6 +194,8 @@ const STYLES = `
   .market-card-title { font-size:13px; font-weight:600; color:var(--text); margin-bottom:16px; display:flex; align-items:center; gap:8px; }
   .market-item { font-family:var(--mono); font-size:12px; color:var(--text2); padding:10px 14px; background:var(--bg4); border-radius:8px; margin-bottom:8px; border-left:3px solid var(--accent3); line-height:1.5; }
   .warning-item { font-family:var(--mono); font-size:12px; color:var(--amber); padding:10px 14px; background:rgba(251,191,36,0.06); border:1px solid rgba(251,191,36,0.15); border-radius:8px; margin-bottom:8px; }
+  .llm-item { font-family:var(--mono); font-size:12px; color:var(--text2); padding:10px 14px; background:var(--bg4); border-radius:8px; margin-bottom:8px; border-left:3px solid var(--accent); line-height:1.5; }
+  .critic-item { font-family:var(--mono); font-size:12px; color:var(--text2); padding:10px 14px; background:var(--bg4); border-radius:8px; margin-bottom:8px; border-left:3px solid var(--accent2); line-height:1.5; }
 
   .json-card { background:var(--bg2); border:1px solid var(--border); border-radius:14px; overflow:hidden; animation:fadeUp 0.6s ease forwards; margin-bottom:32px; }
   .json-header { padding:14px 20px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; background:var(--bg3); }
@@ -208,7 +210,6 @@ const STYLES = `
 
   .empty-state { text-align:center; padding:60px 20px; color:var(--text3); font-family:var(--mono); font-size:13px; }
   .empty-icon { font-size:48px; margin-bottom:16px; opacity:0.3; }
-
   .error-box { background:rgba(248,113,113,0.06); border:1px solid rgba(248,113,113,0.2); border-radius:12px; padding:16px 20px; margin-bottom:24px; font-family:var(--mono); font-size:12px; color:var(--red); }
 `;
 
@@ -217,8 +218,8 @@ const STEPS = [
   { id:"predict",  icon:"📈", name:"Demand Predictor",  desc:"Running Chronos-T5 forecast" },
   { id:"rag",      icon:"🔍", name:"Market Researcher", desc:"Searching FAISS knowledge base" },
   { id:"optimize", icon:"⚙️", name:"LP Optimizer",      desc:"PuLP cost minimization" },
-  { id:"critic",   icon:"🧠", name:"Critic / Refiner",  desc:"Checking business rules" },
-  { id:"report",   icon:"📋", name:"Report Generator",  desc:"Compiling procurement report" },
+  { id:"critic",   icon:"🧠", name:"LLM Critic",        desc:"Llama3 checking business rules" },
+  { id:"report",   icon:"📋", name:"Report Generator",  desc:"Llama3 generating AI report" },
 ];
 
 function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
@@ -248,8 +249,8 @@ export default function App() {
       setStep("predict",  "running", "Running Chronos-T5 forecast...");
       setStep("rag",      "running", "Searching FAISS knowledge base...");
       setStep("optimize", "running", "Running PuLP LP solver...");
-      setStep("critic",   "running", "Checking business rules...");
-      setStep("report",   "running", "Compiling report...");
+      setStep("critic",   "running", "Llama3 checking business rules...");
+      setStep("report",   "running", "Llama3 generating AI report...");
 
       const response = await fetch("http://127.0.0.1:5000/api/run", {
         method: "POST",
@@ -265,7 +266,7 @@ export default function App() {
       setStep("rag",      "done", `Retrieved ${r.market_context.length} documents`);
       setStep("optimize", "done", `Order: ${r.recommended_order_qty} units`);
       setStep("critic",   "done", `Verdict: ${r.critic_verdict}`);
-      setStep("report",   "done", "Report saved");
+      setStep("report",   "done", "AI report generated");
 
       setResult({
         report: r,
@@ -274,12 +275,13 @@ export default function App() {
         verdict: r.critic_verdict,
         orderQty: r.recommended_order_qty,
         totalCost: r.total_cost,
-        predictedDemand: r.predicted_demand_4_weeks
+        predictedDemand: r.predicted_demand_4_weeks,
+        aiReport: r.ai_report,
+        criticReasoning: r.critic_reasoning
       });
 
     } catch(e) {
       setError(e.message);
-      setRunning(false);
     } finally {
       setRunning(false);
     }
@@ -312,7 +314,7 @@ export default function App() {
         <main className="main">
           <div className="hero">
             <h1>Self-Optimizing<br/>Procurement Agent</h1>
-            <p>// RAG · Chronos-T5 · LP Optimizer · LangGraph · Mistral-7B</p>
+            <p>// RAG · Chronos-T5 · LP Optimizer · Llama3 · FAISS</p>
           </div>
 
           <div className="input-section">
@@ -361,9 +363,7 @@ export default function App() {
           </div>
 
           {error && (
-            <div className="error-box">
-              ✗ Error: {error}
-            </div>
+            <div className="error-box">✗ Error: {error}</div>
           )}
 
           {result && (
@@ -397,6 +397,7 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Market Intelligence */}
               <div className="market-card">
                 <div className="market-card-title">🔍 Market Intelligence (RAG)</div>
                 {result.marketDocs.map((doc, i) => (
@@ -404,15 +405,41 @@ export default function App() {
                 ))}
               </div>
 
+              {/* LLM Critic Reasoning */}
+              {result.criticReasoning && (
+                <div className="market-card">
+                  <div className="market-card-title">🧠 LLM Critic Reasoning (Llama3)</div>
+                  {result.criticReasoning.split('\n').map((line, i) => (
+                    line.trim() && (
+                      <div key={i} className="critic-item">{line}</div>
+                    )
+                  ))}
+                </div>
+              )}
+
+              {/* AI Generated Report */}
+              {result.aiReport && (
+                <div className="market-card">
+                  <div className="market-card-title">🤖 AI Generated Report (Llama3)</div>
+                  {result.aiReport.split('\n').map((line, i) => (
+                    line.trim() && (
+                      <div key={i} className="llm-item">{line}</div>
+                    )
+                  ))}
+                </div>
+              )}
+
+              {/* Warnings */}
               {result.warnings.length > 0 && (
                 <div className="market-card">
-                  <div className="market-card-title">⚠️ Critic Warnings</div>
+                  <div className="market-card-title">⚠️ Warnings</div>
                   {result.warnings.map((w, i) => (
                     <div key={i} className="warning-item">⚠ {w}</div>
                   ))}
                 </div>
               )}
 
+              {/* JSON Report */}
               <div className="json-card">
                 <div className="json-header">
                   <div className="json-title">📄 procurement_report.json</div>
