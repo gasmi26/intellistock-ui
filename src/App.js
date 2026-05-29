@@ -224,6 +224,19 @@ const STEPS = [
 
 function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
+// Safely parse warnings — handles both string and array from backend
+function parseWarnings(warnings) {
+  if (!warnings) return [];
+  if (Array.isArray(warnings)) {
+    // Filter out full LLM blobs — keep only short warning strings
+    return warnings.filter(w => typeof w === "string" && w.length < 200);
+  }
+  if (typeof warnings === "string") {
+    return warnings.split("\n").filter(w => w.trim().length > 0);
+  }
+  return [];
+}
+
 export default function App() {
   const [sku, setSku] = useState("ITEM_001");
   const [running, setRunning] = useState(false);
@@ -258,29 +271,43 @@ export default function App() {
         body: JSON.stringify({ sku })
       });
 
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `Server error: ${response.status}`);
+      }
+
       const data = await response.json();
       if (!data.success) throw new Error(data.error);
 
       const r = data.report;
+
       setStep("predict",  "done", `Forecast: ${r.predicted_demand_4_weeks} units`);
-      setStep("rag",      "done", `Retrieved ${r.market_context.length} documents`);
+      setStep("rag",      "done", `Retrieved ${(r.market_context || []).length} documents`);
       setStep("optimize", "done", `Order: ${r.recommended_order_qty} units`);
       setStep("critic",   "done", `Verdict: ${r.critic_verdict}`);
       setStep("report",   "done", "AI report generated");
 
       setResult({
-        report: r,
-        marketDocs: r.market_context,
-        warnings: r.warnings,
-        verdict: r.critic_verdict,
-        orderQty: r.recommended_order_qty,
-        totalCost: r.total_cost,
-        predictedDemand: r.predicted_demand_4_weeks,
-        aiReport: r.ai_report,
-        criticReasoning: r.critic_reasoning
+        report:           r,
+        marketDocs:       r.market_context    || [],
+        warnings:         parseWarnings(r.warnings),
+        verdict:          r.critic_verdict    || "UNKNOWN",
+        orderQty:         r.recommended_order_qty,
+        totalCost:        r.total_cost,
+        predictedDemand:  r.predicted_demand_4_weeks,
+        aiReport:         r.ai_report         || "",
+        criticReasoning:  r.critic_reasoning  || "",
       });
 
     } catch(e) {
+      // Mark all still-running steps as error
+      setStepStates(prev => {
+        const updated = { ...prev };
+        Object.keys(updated).forEach(k => {
+          if (updated[k].state === "running") updated[k] = { ...updated[k], state: "error" };
+        });
+        return updated;
+      });
       setError(e.message);
     } finally {
       setRunning(false);
@@ -383,7 +410,7 @@ export default function App() {
                 </div>
                 <div className="metric-card amber">
                   <div className="metric-label">Total Cost</div>
-                  <div className="metric-value">₹{result.totalCost.toLocaleString()}</div>
+                  <div className="metric-value">₹{(result.totalCost || 0).toLocaleString()}</div>
                   <div className="metric-sub">inc. storage cost</div>
                 </div>
                 <div className={`metric-card ${result.verdict === "PASS" ? "green" : "amber"}`}>
@@ -398,21 +425,21 @@ export default function App() {
               </div>
 
               {/* Market Intelligence */}
-              <div className="market-card">
-                <div className="market-card-title">🔍 Market Intelligence (RAG)</div>
-                {result.marketDocs.map((doc, i) => (
-                  <div key={i} className="market-item">{doc}</div>
-                ))}
-              </div>
+              {result.marketDocs.length > 0 && (
+                <div className="market-card">
+                  <div className="market-card-title">🔍 Market Intelligence (RAG)</div>
+                  {result.marketDocs.map((doc, i) => (
+                    <div key={i} className="market-item">{doc}</div>
+                  ))}
+                </div>
+              )}
 
               {/* LLM Critic Reasoning */}
               {result.criticReasoning && (
                 <div className="market-card">
                   <div className="market-card-title">🧠 LLM Critic Reasoning (Llama3)</div>
-                  {result.criticReasoning.split('\n').map((line, i) => (
-                    line.trim() && (
-                      <div key={i} className="critic-item">{line}</div>
-                    )
+                  {result.criticReasoning.split("\n").filter(l => l.trim()).map((line, i) => (
+                    <div key={i} className="critic-item">{line}</div>
                   ))}
                 </div>
               )}
@@ -421,15 +448,13 @@ export default function App() {
               {result.aiReport && (
                 <div className="market-card">
                   <div className="market-card-title">🤖 AI Generated Report (Llama3)</div>
-                  {result.aiReport.split('\n').map((line, i) => (
-                    line.trim() && (
-                      <div key={i} className="llm-item">{line}</div>
-                    )
+                  {result.aiReport.split("\n").filter(l => l.trim()).map((line, i) => (
+                    <div key={i} className="llm-item">{line}</div>
                   ))}
                 </div>
               )}
 
-              {/* Warnings */}
+              {/* Warnings — only shown if real warnings exist */}
               {result.warnings.length > 0 && (
                 <div className="market-card">
                   <div className="market-card-title">⚠️ Warnings</div>
